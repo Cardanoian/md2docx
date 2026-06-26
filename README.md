@@ -121,7 +121,7 @@ python md2docx.py docs/report.md --reference-doc template.docx
 
 한 번 만든 `template.docx`는 계속 재사용할 수 있어, 사내 표준 양식이나 보고서 서식을
 일관되게 유지하는 데 유용합니다. (한글 폰트가 어색하면 `Normal`/`Source Code` 스타일을
-맑은 고딕·나눔고딕 등으로 지정하세요.)
+Pretendard·맑은 고딕 등으로 지정하세요.)
 
 ---
 

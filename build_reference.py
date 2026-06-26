@@ -23,8 +23,8 @@ def wq(tag): return f"{{{W}}}{tag}"
 def aq(tag): return f"{{{A}}}{tag}"
 
 # ── 디자인 토큰 (스타일 정의서 기준) ─────────────────────────────
-# 폰트 — 정의서: 본문/헤딩 '나눔고딕', 코드 'D2Coding'
-BODY_FONT = "나눔고딕"        # 본문·제목 한글 폰트 (NanumGothic)
+# 폰트 — 정의서: 본문/헤딩 'Pretendard', 코드 'D2Coding'
+BODY_FONT = "Pretendard"      # 본문·제목 한글 폰트 (현대적 시스템 UI 톤, 장문 가독성)
 CODE_FONT = "D2Coding"        # 코드 폰트 (한글 주석까지 고정폭 정렬)
 
 # 색상 팔레트 (RRGGBB, '#' 없이) — 정의서 1절 그대로
@@ -38,6 +38,7 @@ BODY_INK       = "1A1A1A"     # 본문 글자
 CODE_INK       = "24292E"     # 코드블록 글자
 CODE_BG        = "F6F8FA"     # 코드블록 배경 (GitHub 라이트 톤)
 CODE_BORDER    = "D0D7DE"     # 코드블록 테두리
+TABLE_GRID     = "D0D7DE"     # 표 셀 격자선 (코드 테두리와 같은 톤)
 INLINE_CODE_BG = "F4F4F4"     # 인라인 코드 음영
 QUOTE_TINT     = "FCF3F2"     # 인용/팁 박스 배경
 LINK_BLUE      = "1D4ED8"     # 하이퍼링크
@@ -279,9 +280,27 @@ def main():
     )
     sroot.append(sc)
 
-    # (1-q) Table(표): 헤더행에 레드 틴트 배경 + 레드 굵은 글자
+    # (1-q) Table(표): 사방·내부 격자선 + 헤더행 레드 틴트 배경·레드 굵은 글자·레드 하단선
     tbl = style("Table")
     if tbl is not None:
+        TBLPR_ORDER = ["tblStyle", "tblpPr", "tblOverlap", "bidiVisual",
+                       "tblStyleRowBandSize", "tblStyleColBandSize", "tblW", "jc",
+                       "tblCellSpacing", "tblInd", "tblBorders", "shd", "tblLayout",
+                       "tblCellMar", "tblLook", "tblCaption", "tblDescription"]
+        BORDER_SIDES = ["top", "left", "bottom", "right", "insideH", "insideV"]
+
+        # 표 전체 격자선: 모든 셀 사방 + 내부 0.5pt(sz=4) 옅은 회색
+        tblpr = tbl.find(wq("tblPr"))
+        if tblpr is None:
+            tblpr = mk("tblPr")
+            ordered_insert(tbl, tblpr, ["pPr", "rPr", "tblPr", "trPr", "tcPr", "tblStylePr"])
+        for old in tblpr.findall(wq("tblBorders")):
+            tblpr.remove(old)
+        tb = mk("tblBorders")
+        for side in BORDER_SIDES:
+            tb.append(border(side, "4", "0", TABLE_GRID))
+        ordered_insert(tblpr, tb, TBLPR_ORDER)
+
         fr = None
         for tp in tbl.findall(wq("tblStylePr")):
             if tp.get(wq("type")) == "firstRow":
@@ -293,7 +312,7 @@ def main():
                 fr.remove(old)
             rpr = mk("rPr"); rpr.append(mk("b")); rpr.append(mk("bCs")); rpr.append(mk("color", val=RAILS_RED))
             ordered_insert(fr, rpr, TBLSTYLE_ORDER)
-            # 헤더 배경 음영: tcPr 없으면 생성 후 삽입
+            # 헤더 셀: tcPr 없으면 생성 후 삽입
             tcpr = fr.find(wq("tcPr"))
             if tcpr is None:
                 tcpr = mk("tcPr")
@@ -301,6 +320,12 @@ def main():
             TCPR_ORDER = ["cnfStyle", "tcW", "gridSpan", "hMerge", "vMerge",
                           "tcBorders", "shd", "noWrap", "tcMar", "textDirection",
                           "tcFitText", "vAlign", "hideMark"]
+            # 헤더 하단: 1pt(sz=8) 레드 선 — 색만으로 부족했던 헤더/본문 구분을 또렷하게
+            for old in tcpr.findall(wq("tcBorders")):
+                tcpr.remove(old)
+            tcb = mk("tcBorders"); tcb.append(border("bottom", "8", "0", RAILS_RED))
+            ordered_insert(tcpr, tcb, TCPR_ORDER)
+            # 헤더 배경 음영
             for old in tcpr.findall(wq("shd")):
                 tcpr.remove(old)
             ordered_insert(tcpr, shd(TH_BG), TCPR_ORDER)
