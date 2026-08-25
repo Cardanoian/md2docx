@@ -33,6 +33,7 @@ md2docx.py — 마크다운(.md)을 Word 문서(.docx)로 변환하는 범용 �
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -52,6 +53,10 @@ VALID_HIGHLIGHT_STYLES = (
 DEFAULT_HIGHLIGHT_STYLE = "tango"
 
 
+class ConversionError(Exception):
+    """변환 준비 또는 실행 중 발생한 오류."""
+
+
 def find_pandoc() -> str:
     """pandoc 실행 파일 경로를 반환한다.
 
@@ -59,7 +64,7 @@ def find_pandoc() -> str:
       1순위: 시스템 PATH에 설치된 pandoc (brew/apt/winget 등으로 설치한 경우)
       2순위: pypandoc-binary로 함께 설치된 번들 pandoc
              (pip install -r requirements.txt 만으로 OS 무관하게 동작)
-    둘 다 없으면 설치 방법을 안내하고 종료한다.
+    둘 다 없으면 ConversionError를 발생시킨다.
     """
     pandoc = shutil.which("pandoc")
     if pandoc:
@@ -70,7 +75,7 @@ def find_pandoc() -> str:
         return pypandoc.get_pandoc_path()
     except Exception:
         pass
-    sys.exit(
+    raise ConversionError(
         "오류: pandoc을 찾을 수 없습니다.\n"
         "  가장 간단한 해결: pip install -r requirements.txt\n"
         "  (pypandoc-binary가 pandoc 바이너리까지 함께 설치합니다)\n\n"
@@ -82,7 +87,7 @@ def find_pandoc() -> str:
     )
 
 
-def make_reference_doc(pandoc: str, dest: Path) -> None:
+def make_reference_doc(pandoc: str, dest: Path) -> Path:
     """pandoc 기본 reference.docx 템플릿을 추출한다.
 
     이 파일을 워드에서 열어 '본문/제목 1/Source Code' 등 스타일을 편집한 뒤
@@ -91,15 +96,19 @@ def make_reference_doc(pandoc: str, dest: Path) -> None:
     """
     dest = dest.expanduser().resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "wb") as f:
-        subprocess.run(
-            [pandoc, "--print-default-data-file", "reference.docx"],
-            stdout=f,
-            check=True,
-        )
-    print(f"참조 문서 템플릿 생성 완료: {dest}")
-    print("  → 워드에서 스타일(특히 'Source Code', 'Heading 1~6')을 편집한 뒤")
-    print(f'    --reference-doc "{dest}" 로 적용하세요.')
+    try:
+        with open(dest, "wb") as f:
+            subprocess.run(
+                [pandoc, "--print-default-data-file", "reference.docx"],
+                stdout=f,
+                check=True,
+            )
+    except subprocess.CalledProcessError as e:
+        raise ConversionError(
+            "오류: 참조 문서 템플릿 생성에 실패했습니다.\n"
+            f"  메시지:\n{e.stderr}"
+        ) from e
+    return dest
 
 
 def convert(
@@ -110,11 +119,12 @@ def convert(
     reference_doc: Path | None,
     toc: bool,
     extra_resource_paths: list[str],
-) -> None:
-    """마크다운 → docx 변환 수행."""
+    toc_depth: int = 3,
+) -> Path:
+    """마크다운 → docx 변환 수행. 생성된 출력 경로를 반환한다."""
     src = src.expanduser().resolve()
     if not src.is_file():
-        sys.exit(f"오류: 입력 파일을 찾을 수 없습니다 → {src}")
+        raise ConversionError(f"오류: 입력 파일을 찾을 수 없습니다 → {src}")
 
     out = out.expanduser().resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -123,8 +133,6 @@ def convert(
     #   1순위 = 마크다운 파일이 있는 디렉터리 (상대경로 이미지의 기준점)
     #   추가로 사용자가 지정한 경로들도 탐색 대상에 포함
     # OS에 따라 경로 구분자가 다르므로 os.pathsep로 합친다.
-    import os
-
     resource_paths = [str(src.parent), *extra_resource_paths]
     resource_path = os.pathsep.join(resource_paths)
 
@@ -149,23 +157,23 @@ def convert(
         "--standalone",
     ]
     if toc:
-        cmd += ["--toc", "--toc-depth=3"]
+        cmd += ["--toc", f"--toc-depth={toc_depth}"]
     if reference_doc:
         ref = reference_doc.expanduser().resolve()
         if not ref.is_file():
-            sys.exit(f"오류: 참조 문서를 찾을 수 없습니다 → {ref}")
+            raise ConversionError(f"오류: 참조 문서를 찾을 수 없습니다 → {ref}")
         cmd += ["--reference-doc", str(ref)]
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
-        sys.exit(
+        raise ConversionError(
             "오류: pandoc 변환에 실패했습니다.\n"
             f"  명령: {' '.join(cmd)}\n"
             f"  메시지:\n{e.stderr}"
-        )
+        ) from e
 
-    print(f"변환 완료: {src.name} → {out}")
+    return out
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -174,6 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("input", nargs="?", help="입력 마크다운 파일 경로(.md)")
+    p.add_argument(
+        "--gui",
+        action="store_true",
+        help="그래픽 인터페이스(Tkinter)로 실행",
+    )
     p.add_argument(
         "-o",
         "--output",
@@ -208,30 +221,45 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _launch_gui() -> None:
+    from gui import run_app
+
+    run_app()
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    pandoc = find_pandoc()
 
-    # 참조 문서 템플릿 생성 모드
-    if args.make_reference:
-        make_reference_doc(pandoc, Path(args.make_reference))
+    if args.gui or (not args.input and not args.make_reference):
+        _launch_gui()
         return
 
-    if not args.input:
-        sys.exit("오류: 입력 마크다운 파일을 지정하세요. (-h 로 도움말 확인)")
+    try:
+        pandoc = find_pandoc()
 
-    src = Path(args.input)
-    out = Path(args.output) if args.output else src.with_suffix(".docx")
+        # 참조 문서 템플릿 생성 모드
+        if args.make_reference:
+            dest = make_reference_doc(pandoc, Path(args.make_reference))
+            print(f"참조 문서 템플릿 생성 완료: {dest}")
+            print("  → 워드에서 스타일(특히 'Source Code', 'Heading 1~6')을 편집한 뒤")
+            print(f'    --reference-doc "{dest}" 로 적용하세요.')
+            return
 
-    convert(
-        pandoc=pandoc,
-        src=src,
-        out=out,
-        highlight_style=args.highlight_style,
-        reference_doc=Path(args.reference_doc) if args.reference_doc else None,
-        toc=args.toc,
-        extra_resource_paths=args.resource_path,
-    )
+        src = Path(args.input)
+        out = Path(args.output) if args.output else src.with_suffix(".docx")
+
+        result = convert(
+            pandoc=pandoc,
+            src=src,
+            out=out,
+            highlight_style=args.highlight_style,
+            reference_doc=Path(args.reference_doc) if args.reference_doc else None,
+            toc=args.toc,
+            extra_resource_paths=args.resource_path,
+        )
+        print(f"변환 완료: {src.name} → {result}")
+    except ConversionError as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":

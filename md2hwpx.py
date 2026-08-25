@@ -42,8 +42,12 @@ sys.path = [p for p in sys.path if p not in ("", _SCRIPT_DIR)]
 logging.getLogger("md2hwpx").setLevel(logging.ERROR)
 
 
+class ConversionError(Exception):
+    """변환 준비 또는 실행 중 발생한 오류."""
+
+
 def require_md2hwpx():
-    """md2hwpx 패키지를 불러온다. 없으면 설치 방법을 안내하고 종료한다."""
+    """md2hwpx 패키지를 불러온다. 없으면 ConversionError를 발생시킨다."""
     try:
         import md2hwpx
         from md2hwpx.MarkdownToHwpx import MarkdownToHwpx
@@ -54,11 +58,11 @@ def require_md2hwpx():
             parse_markdown_with_frontmatter,
         )
         from md2hwpx.marko_adapter import MarkoToPandocAdapter
-    except ImportError:
-        sys.exit(
+    except ImportError as e:
+        raise ConversionError(
             "오류: md2hwpx 패키지를 찾을 수 없습니다.\n"
             "  가장 간단한 해결: pip install -r requirements.txt"
-        )
+        ) from e
     return (
         md2hwpx,
         MarkdownToHwpx,
@@ -75,7 +79,7 @@ def default_reference_path(md2hwpx_mod) -> Path:
     return pkg_dir / "blank.hwpx"
 
 
-def make_reference_doc(dest: Path) -> None:
+def make_reference_doc(dest: Path) -> Path:
     """기본 참조 HWPX 템플릿을 추출한다.
 
     이 파일을 한글에서 열어 스타일을 편집한 뒤 --reference-doc 으로 넘기면
@@ -84,14 +88,12 @@ def make_reference_doc(dest: Path) -> None:
     md2hwpx_mod, *_ = require_md2hwpx()
     src = default_reference_path(md2hwpx_mod)
     if not src.is_file():
-        sys.exit(f"오류: 기본 참조 템플릿을 찾을 수 없습니다 → {src}")
+        raise ConversionError(f"오류: 기본 참조 템플릿을 찾을 수 없습니다 → {src}")
 
     dest = dest.expanduser().resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
-    print(f"참조 문서 템플릿 생성 완료: {dest}")
-    print("  → 한글에서 스타일(제목, 본문, 표 등)을 편집한 뒤")
-    print(f'    --reference-doc "{dest}" 로 적용하세요.')
+    return dest
 
 
 def _merge_dir_contents(src_dir: Path, dest_dir: Path) -> None:
@@ -109,8 +111,8 @@ def convert(
     out: Path,
     reference_doc: Path | None,
     extra_resource_paths: list[str],
-) -> None:
-    """마크다운 → hwpx 변환 수행."""
+) -> Path:
+    """마크다운 → hwpx 변환 수행. 생성된 출력 경로를 반환한다."""
     (
         md2hwpx_mod,
         MarkdownToHwpx,
@@ -123,7 +125,7 @@ def convert(
 
     src = src.expanduser().resolve()
     if not src.is_file():
-        sys.exit(f"오류: 입력 파일을 찾을 수 없습니다 → {src}")
+        raise ConversionError(f"오류: 입력 파일을 찾을 수 없습니다 → {src}")
 
     out = out.expanduser().resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -131,11 +133,11 @@ def convert(
     if reference_doc:
         ref = reference_doc.expanduser().resolve()
         if not ref.is_file():
-            sys.exit(f"오류: 참조 문서를 찾을 수 없습니다 → {ref}")
+            raise ConversionError(f"오류: 참조 문서를 찾을 수 없습니다 → {ref}")
     else:
         ref = default_reference_path(md2hwpx_mod)
         if not ref.is_file():
-            sys.exit(f"오류: 기본 참조 템플릿을 찾을 수 없습니다 → {ref}")
+            raise ConversionError(f"오류: 기본 참조 템플릿을 찾을 수 없습니다 → {ref}")
 
     work_src = src
     tmp_dir: tempfile.TemporaryDirectory[str] | None = None
@@ -151,7 +153,7 @@ def convert(
                 _merge_dir_contents(extra, work_dir)
             work_src = work_dir / src.name
             if not work_src.is_file():
-                sys.exit(f"오류: 작업 복사본을 만들 수 없습니다 → {work_src}")
+                raise ConversionError(f"오류: 작업 복사본을 만들 수 없습니다 → {work_src}")
 
         metadata, md_content = parse_markdown_with_frontmatter(str(work_src))
         adapter = MarkoToPandocAdapter(config=ConversionConfig())
@@ -166,12 +168,12 @@ def convert(
             config=ConversionConfig(),
         )
     except HwpxError as e:
-        sys.exit(f"오류: HWPX 변환에 실패했습니다.\n  메시지: {e}")
+        raise ConversionError(f"오류: HWPX 변환에 실패했습니다.\n  메시지: {e}") from e
     finally:
         if tmp_dir is not None:
             tmp_dir.cleanup()
 
-    print(f"변환 완료: {src.name} → {out}")
+    return out
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -180,6 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("input", nargs="?", help="입력 마크다운 파일 경로(.md)")
+    p.add_argument(
+        "--gui",
+        action="store_true",
+        help="그래픽 인터페이스(Tkinter)로 실행",
+    )
     p.add_argument(
         "-o",
         "--output",
@@ -203,25 +210,43 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _launch_gui() -> None:
+    # 패키지 import 때문에 스크립트 디렉터리를 sys.path에서 뺐으므로,
+    # 같은 폴더의 gui.py를 찾으려면 잠시 다시 넣는다.
+    if _SCRIPT_DIR not in sys.path:
+        sys.path.insert(0, _SCRIPT_DIR)
+    from gui import run_app
+
+    run_app()
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
 
-    if args.make_reference:
-        make_reference_doc(Path(args.make_reference))
+    if args.gui or (not args.input and not args.make_reference):
+        _launch_gui()
         return
 
-    if not args.input:
-        sys.exit("오류: 입력 마크다운 파일을 지정하세요. (-h 로 도움말 확인)")
+    try:
+        if args.make_reference:
+            dest = make_reference_doc(Path(args.make_reference))
+            print(f"참조 문서 템플릿 생성 완료: {dest}")
+            print("  → 한글에서 스타일(제목, 본문, 표 등)을 편집한 뒤")
+            print(f'    --reference-doc "{dest}" 로 적용하세요.')
+            return
 
-    src = Path(args.input)
-    out = Path(args.output) if args.output else src.with_suffix(".hwpx")
+        src = Path(args.input)
+        out = Path(args.output) if args.output else src.with_suffix(".hwpx")
 
-    convert(
-        src=src,
-        out=out,
-        reference_doc=Path(args.reference_doc) if args.reference_doc else None,
-        extra_resource_paths=args.resource_path,
-    )
+        result = convert(
+            src=src,
+            out=out,
+            reference_doc=Path(args.reference_doc) if args.reference_doc else None,
+            extra_resource_paths=args.resource_path,
+        )
+        print(f"변환 완료: {src.name} → {result}")
+    except ConversionError as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":

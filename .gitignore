@@ -1,3 +1,5 @@
 .venv/
 .omc/
 __pycache__/
+doc/
+venv/
