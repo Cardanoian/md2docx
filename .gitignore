@@ -1,4 +1,6 @@
 .venv/
 .omc/
 __pycache__/
-docs
+doc/
+docs/
+venv/

@@ -1,31 +1,77 @@
 # md2docx 사용 매뉴얼
 
-마크다운(`.md`) 파일을 Word 문서(`.docx`)로 변환하는 파이썬 스크립트입니다.
-마크다운 형식 전체(헤더·표·리스트·인용·각주 등), 로컬 이미지 임베드,
-코드 구문 강조를 모두 지원합니다.
+마크다운(`.md`) 파일을 **Word(`.docx`)** 와 **한글(`.hwpx`)** 로 변환하는 파이썬 스크립트입니다.
+헤더·표·리스트·인용·각주, 로컬 이미지 임베드를 지원합니다. Word 변환은 코드 구문 강조와
+목차 자동 생성까지 포함합니다.
 
 이 매뉴얼은 **파이썬이 이미 설치돼 있다는 가정** 하에, Ubuntu 24.04 LTS / macOS /
 Windows 각각에서 가상환경(venv) 생성부터 실제 사용까지 모든 과정을 안내합니다.
 
 ---
 
+## 바로 실행하기 (복붙용)
+
+한 줄로 말하면, `문서.md`를 넣으면 같은 이름의 Word 또는 한글 파일이 만들어집니다.
+가상환경이 이미 활성화돼 있다면 아래만 복사해 실행하면 됩니다.
+
+```bash
+# Word 문서(.docx)로 변환
+python md2docx.py 문서.md
+
+# 한글 문서(.hwpx)로 변환 — 한컴오피스가 없어도 파일이 생성됩니다
+python md2hwpx.py 문서.md
+```
+
+출력 경로를 지정하려면 `-o` 를 붙입니다.
+
+```bash
+python md2docx.py 문서.md -o out/문서.docx
+python md2hwpx.py 문서.md -o out/문서.hwpx
+```
+
+처음 쓰는 경우, 아래 블록을 **한 번에** 복사해 실행하세요. (venv 생성과 패키지 설치 포함)
+
+```bash
+# --- Ubuntu / macOS ---
+cd ~/md2docx
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip && pip install -r requirements.txt
+python md2docx.py docs/report.md
+python md2hwpx.py docs/report.md
+```
+
+```powershell
+# --- Windows (PowerShell) ---
+cd $HOME\md2docx
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip ; pip install -r requirements.txt
+python md2docx.py docs\report.md
+python md2hwpx.py docs\report.md
+```
+
+설치·OS별 세부 절차, 옵션, 스타일 템플릿은 아래 절을 이어서 보면 됩니다.
+
+---
+
 ## 0. 동작 방식 한눈에 보기
 
-이 스크립트는 내부적으로 **pandoc**이라는 문서 변환 엔진을 호출합니다.
-따라서 준비물은 두 가지뿐입니다.
+변환 대상에 따라 엔진이 다릅니다. 둘 다 `pip install -r requirements.txt` 한 번으로 준비됩니다.
 
-1. `md2docx.py` — 변환 스크립트 (파이썬 표준 라이브러리만 사용)
-2. **pandoc 바이너리** — `requirements.txt`(`pypandoc-binary`)로 함께 설치
+| 결과물     | 스크립트      | 엔진                                      | 한컴오피스 |
+| ---------- | ------------- | ----------------------------------------- | ---------- |
+| `.docx`    | `md2docx.py`  | **pandoc** (`pypandoc-binary`로 함께 설치) | 불필요     |
+| `.hwpx`    | `md2hwpx.py`  | **md2hwpx** (순수 파이썬)                  | 불필요     |
 
-`pip install -r requirements.txt` 한 번이면 pandoc까지 같이 깔리므로,
-세 OS의 설치 절차가 거의 동일합니다. (시스템에 pandoc을 직접 설치한 경우,
-스크립트는 그쪽을 우선 사용합니다.)
+Word 변환은 시스템에 pandoc이 이미 있으면 그쪽을 **우선** 사용합니다.
 
 ### 권장 폴더 구조
 
 ```
 md2docx/
-├── md2docx.py          # 변환 스크립트
+├── md2docx.py          # Word(.docx) 변환 스크립트
+├── md2hwpx.py          # 한글(.hwpx) 변환 스크립트
 ├── requirements.txt    # 의존성 목록
 ├── .venv/              # 가상환경 (아래에서 생성)
 └── docs/               # 변환할 마크다운과 이미지를 모아두는 작업 폴더(예시)
@@ -37,7 +83,8 @@ md2docx/
 > **이미지 경로 규칙**: 마크다운 안의 `![](images/sample.png)` 같은 상대경로는
 > **마크다운 파일이 있는 위치**를 기준으로 자동 해석됩니다. 즉 `report.md`와
 > `images/` 폴더가 같은 디렉터리에 있으면, 어느 위치에서 스크립트를 실행하든
-> 이미지가 정상적으로 들어갑니다.
+> 이미지가 정상적으로 들어갑니다. 이미지가 다른 폴더에 있다면
+> `--resource-path /이미지/폴더/경로` 로 탐색 경로를 추가하세요.
 
 ---
 
@@ -62,7 +109,7 @@ py --version
 세 OS 모두 흐름은 동일합니다:
 **① 작업 폴더로 이동 → ② venv 생성 → ③ venv 활성화 → ④ 의존성 설치 → ⑤ 확인**
 
-스크립트(`md2docx.py`)와 `requirements.txt`를 먼저 같은 폴더에 넣어두세요.
+스크립트(`md2docx.py`, `md2hwpx.py`)와 `requirements.txt`를 먼저 같은 폴더에 넣어두세요.
 
 ### 2-A. Ubuntu 24.04 LTS
 
@@ -83,12 +130,13 @@ python3 -m venv .venv
 # ③ 활성화 (프롬프트 앞에 (.venv) 표시됨)
 source .venv/bin/activate
 
-# ④ 의존성 설치 (pandoc 포함)
+# ④ 의존성 설치 (pandoc, md2hwpx 포함)
 pip install --upgrade pip
 pip install -r requirements.txt
 
 # ⑤ 설치 확인
 python -c "import pypandoc; print('pandoc', pypandoc.get_pandoc_version())"
+python -c "import md2hwpx; print('md2hwpx', md2hwpx.__version__)"
 ```
 
 > **참고(PEP 668)**: Ubuntu 24.04는 시스템 파이썬에 직접 `pip install`을 하면
@@ -109,12 +157,13 @@ python3 -m venv .venv
 # ③ 활성화
 source .venv/bin/activate
 
-# ④ 의존성 설치 (pandoc 포함)
+# ④ 의존성 설치 (pandoc, md2hwpx 포함)
 pip install --upgrade pip
 pip install -r requirements.txt
 
 # ⑤ 설치 확인
 python -c "import pypandoc; print('pandoc', pypandoc.get_pandoc_version())"
+python -c "import md2hwpx; print('md2hwpx', md2hwpx.__version__)"
 ```
 
 > macOS 기본 셸은 zsh이며 활성화 명령은 bash와 동일합니다.
@@ -137,12 +186,13 @@ py -m venv .venv
 # ③ 활성화
 .\.venv\Scripts\Activate.ps1
 
-# ④ 의존성 설치 (pandoc 포함)
+# ④ 의존성 설치 (pandoc, md2hwpx 포함)
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
 # ⑤ 설치 확인
 python -c "import pypandoc; print('pandoc', pypandoc.get_pandoc_version())"
+python -c "import md2hwpx; print('md2hwpx', md2hwpx.__version__)"
 ```
 
 > **활성화 시 보안 오류가 나는 경우**
@@ -161,14 +211,16 @@ py -m venv .venv
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 python -c "import pypandoc; print('pandoc', pypandoc.get_pandoc_version())"
+python -c "import md2hwpx; print('md2hwpx', md2hwpx.__version__)"
 ```
 
 ---
 
 ## 3. (선택) pandoc을 시스템에 직접 설치
 
-`requirements.txt`만으로 충분하지만, 시스템 전역에서 pandoc을 쓰고 싶다면
-아래처럼 설치할 수 있습니다. 설치돼 있으면 스크립트가 이쪽을 **우선** 사용합니다.
+Word 변환만 해당합니다. `requirements.txt`만으로 충분하지만, 시스템 전역에서
+pandoc을 쓰고 싶다면 아래처럼 설치할 수 있습니다. 설치돼 있으면 `md2docx.py`가
+이쪽을 **우선** 사용합니다.
 
 | OS      | 명령                      |
 | ------- | ------------------------- |
@@ -178,9 +230,11 @@ python -c "import pypandoc; print('pandoc', pypandoc.get_pandoc_version())"
 
 설치 확인: `pandoc --version`
 
+한글(`.hwpx`) 변환은 pandoc을 쓰지 않으므로 이 단계는 필요 없습니다.
+
 ---
 
-## 4. 기본 사용법
+## 4. Word(.docx) 변환
 
 가상환경이 활성화된 상태(프롬프트에 `(.venv)` 표시)에서 실행합니다.
 
@@ -199,7 +253,29 @@ python md2docx.py docs/report.md --toc --highlight-style breezedark
 
 ---
 
-## 5. 옵션 전체
+## 5. 한글(.hwpx) 변환
+
+한컴오피스가 설치돼 있지 않아도 `.hwpx` 파일이 만들어집니다. 결과 파일을 열어 보려면
+한글(한컴오피스)이 필요합니다.
+
+```bash
+# 가장 단순한 변환: report.md → report.hwpx (같은 폴더에 생성)
+python md2hwpx.py docs/report.md
+
+# 출력 경로를 직접 지정
+python md2hwpx.py docs/report.md -o out/report.hwpx
+```
+
+변환이 끝나면 `변환 완료: report.md → .../report.hwpx` 메시지가 출력됩니다.
+
+Word 변환에 있는 `--toc`, `--highlight-style` 은 HWPX 엔진이 지원하지 않습니다.
+목차가 필요하면 마크다운에 직접 넣고, 코드 강조 테마는 Word 변환 쪽에서 조정하세요.
+
+---
+
+## 6. 옵션 전체
+
+### Word — `md2docx.py`
 
 | 옵션                    | 설명                                                     |
 | ----------------------- | -------------------------------------------------------- |
@@ -212,17 +288,30 @@ python md2docx.py docs/report.md --toc --highlight-style breezedark
 | `--make-reference DEST` | 참조 문서 템플릿을 DEST에 생성하고 종료                  |
 | `-h`, `--help`          | 도움말 출력                                              |
 
-### 하이라이트 테마 목록
+#### 하이라이트 테마 목록
 
 `pygments`(기본 밝은 톤), `tango`(기본값), `espresso`, `zenburn`,
 `kate`, `monochrome`(흑백), `breezedark`(다크), `haddock`
 
+### 한글 — `md2hwpx.py`
+
+| 옵션                    | 설명                                                     |
+| ----------------------- | -------------------------------------------------------- |
+| `input`                 | (필수) 입력 마크다운 파일 경로                           |
+| `-o`, `--output`        | 출력 hwpx 경로 (생략 시 입력과 같은 이름의 `.hwpx`)      |
+| `--reference-doc`       | 세부 스타일 제어용 참조 문서 적용                        |
+| `--resource-path`       | 이미지 등 리소스를 추가로 탐색할 폴더(여러 번 지정 가능) |
+| `--make-reference DEST` | 참조 문서 템플릿을 DEST에 생성하고 종료                  |
+| `-h`, `--help`          | 도움말 출력                                              |
+
 ---
 
-## 6. 코드/헤딩 스타일을 더 세밀하게 제어하기 (참조 문서)
+## 7. 코드/헤딩 스타일을 더 세밀하게 제어하기 (참조 문서)
 
 폰트, 헤딩 색상, **코드블록 배경/글꼴** 같은 세부 스타일까지 통제하려면
-"참조 문서(reference document)" 방식을 사용합니다. 3단계입니다.
+"참조 문서(reference document)" 방식을 사용합니다.
+
+### Word 템플릿
 
 ```bash
 # 1) 템플릿 추출
@@ -240,9 +329,23 @@ python md2docx.py docs/report.md --reference-doc template.docx
 한 번 만든 `template.docx`는 계속 재사용할 수 있어, 사내 표준 양식이나
 보고서 서식을 일관되게 유지하는 데 유용합니다.
 
+### 한글 템플릿
+
+```bash
+# 1) 템플릿 추출
+python md2hwpx.py --make-reference template.hwpx
+
+# 2) template.hwpx를 한글에서 열어 스타일 편집 후 저장
+#    - 제목/본문/표 스타일
+#    - (선택) {{H1}} {{H2}} {{BODY}} 같은 플레이스홀더로 서식 지정
+
+# 3) 편집한 템플릿을 적용해 변환
+python md2hwpx.py docs/report.md --reference-doc template.hwpx
+```
+
 ---
 
-## 7. 작업 종료 / 재개
+## 8. 작업 종료 / 재개
 
 ```bash
 # 가상환경 빠져나오기 (모든 OS 공통)
@@ -260,15 +363,20 @@ deactivate
 
 ---
 
-## 8. 트러블슈팅
+## 9. 트러블슈팅
 
 **`pandoc을 찾을 수 없습니다` 오류**
 가상환경이 활성화돼 있는지(프롬프트에 `(.venv)`), 그리고
 `pip install -r requirements.txt`가 성공했는지 확인하세요.
 
-**이미지가 docx에 안 들어감**
+**`md2hwpx 패키지를 찾을 수 없습니다` 오류**
+가상환경 활성화 후 `pip install -r requirements.txt`를 다시 실행하세요.
+예전에 docx만 쓰던 환경이라면 의존성이 늘어났으므로 한 번 더 설치해야 합니다.
+
+**이미지가 결과에 안 들어감**
 마크다운의 이미지 경로가 마크다운 파일 기준 상대경로인지 확인하세요.
 이미지가 다른 폴더에 있다면 `--resource-path /이미지/폴더/경로`로 추가 지정합니다.
+HWPX는 절대 경로 이미지와 `../` 상위 폴더 참조를 보안상 허용하지 않습니다.
 
 **Ubuntu에서 `python3 -m venv` 실패**
 `sudo apt install -y python3-venv` 후 다시 시도하세요.
@@ -280,28 +388,10 @@ deactivate
 **`python` 명령이 인식되지 않음 (Windows)**
 `python` 대신 `py`를 사용하세요. (단, venv 활성화 이후에는 `python`이 동작합니다.)
 
-**한글이 깨지거나 폰트가 어색함**
-참조 문서(6번)에서 `Normal`/`Source Code` 스타일의 글꼴을
+**한글이 깨지거나 폰트가 어색함 (docx)**
+참조 문서(7번)에서 `Normal`/`Source Code` 스타일의 글꼴을
 Pretendard·맑은 고딕 등 설치된 한글 글꼴로 지정하면 해결됩니다.
 
----
-
-## 9. 빠른 시작 요약 (복붙용)
-
-```bash
-# --- Ubuntu / macOS ---
-cd ~/md2docx
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip && pip install -r requirements.txt
-python md2docx.py docs/report.md --toc
-```
-
-```powershell
-# --- Windows (PowerShell) ---
-cd $HOME\md2docx
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip ; pip install -r requirements.txt
-python md2docx.py docs\report.md --toc
-```
+**만든 `.hwpx`가 한글에서 안 열림**
+변환 자체는 한컴 없이 됩니다. 파일을 **여는 쪽**에는 한글(한컴오피스)이 필요합니다.
+한컴이 없다면 Word(`.docx`)로 변환해 확인하세요.

@@ -1,1 +1,2 @@
 pypandoc-binary >= 1.17
+md2hwpx >= 0.1.5
